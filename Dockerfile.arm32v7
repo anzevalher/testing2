@@ -1,19 +1,28 @@
-FROM debian:stretch-slim AS node-exporter-builder
+FROM debian:9.8-slim AS alertmanager-builder
 
-COPY --from=golang:stretch /usr/local/go /usr/local/go
+COPY --from=golang:1.12 /usr/local/go /usr/local/go
 
 RUN ln -s /usr/local/go/bin/go /usr/local/bin/go \
- && apt-get update && apt-get -y install git gcc \
- && mkdir -p ~/go/src/github.com/prometheus/node_exporter \
- && git clone -b master https://github.com/prometheus/node_exporter.git ~/go/src/github.com/prometheus/node_exporter \
- && cd ~/go/src/github.com/prometheus/node_exporter \
- && GOOS=linux GOARCH=arm GOARM=7 go build
+ && apt-get update && apt-get -y install git \
+ && mkdir -p ~/go/src/github.com/prometheus/alertmanager \
+ && git clone -b v0.16.1 https://github.com/prometheus/alertmanager.git ~/go/src/github.com/prometheus/alertmanager \
+ && cd ~/go/src/github.com/prometheus/alertmanager/cmd/alertmanager/ \
+ && GOOS=linux GOARCH=arm GOARM=7 go build \
+ && mkdir -p /etc/alertmanager/template \
+ && mkdir /data \
+ && cp ~/go/src/github.com/prometheus/alertmanager/doc/examples/simple.yml /etc/alertmanager/config.yml
 
-FROM arm32v7/busybox:glibc AS node-exporter
+FROM arm32v7/busybox:1.30-glibc
 
-COPY --from=node-exporter-builder /root/go/src/github.com/prometheus/node_exporter/node_exporter /usr/sbin/node_exporter
+COPY --from=alertmanager-builder /root/go/src/github.com/prometheus/alertmanager/cmd/alertmanager/alertmanager /usr/sbin/alertmanager
+COPY --from=alertmanager-builder --chown=nobody:nogroup /etc/alertmanager/ /etc/alertmanager/
+COPY --from=alertmanager-builder --chown=nobody:nogroup /data/ /data/
 
-USER nobody
+USER       nobody
 
-EXPOSE 9100
-ENTRYPOINT ["node_exporter"]
+EXPOSE     9093
+VOLUME     [ "/data" ]
+ENTRYPOINT [ "alertmanager" ]
+CMD        [ "--config.file=/etc/alertmanager/config.yml", \
+             "--storage.path=/data" ]
+
